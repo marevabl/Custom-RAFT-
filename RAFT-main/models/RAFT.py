@@ -23,7 +23,7 @@ class Model(nn.Module):
           # fall back to CPU
           self.device = torch.device("cpu")
             
-        self.task_name = configs.task_name
+        self.task_name = getattr(configs, "task_name", "long_term_forecast")
         self.seq_len = configs.seq_len
         if self.task_name == 'classification' or self.task_name == 'anomaly_detection' or self.task_name == 'imputation':
             self.pred_len = configs.seq_len
