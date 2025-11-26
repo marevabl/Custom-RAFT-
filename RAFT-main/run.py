@@ -40,6 +40,11 @@ def main():
         # Model / retrieval hyperparameters
     parser.add_argument('--n_period', type=int, default=24,
                         help='period length for retrieval (e.g. 24 for 24h daily seasonality)')
+        # Model / retrieval hyperparameters
+    parser.add_argument('--n_period', type=int, default=24,
+                        help='period length for retrieval (e.g. 24 for 24h daily seasonality)')
+    parser.add_argument('--topm', type=int, default=5,
+                        help='number of top similar patches to retrieve')
 
         # Model input/output sizes (will be auto-set from data if not given)
     parser.add_argument('--enc_in', type=int, default=None,
