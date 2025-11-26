@@ -1,43 +1,61 @@
-from data_provider.data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom
+from data_provider.data_loader import Dataset_Custom
 from torch.utils.data import DataLoader
-
-data_dict = {
-    'ETTh1': Dataset_ETT_hour,
-    'ETTh2': Dataset_ETT_hour,
-    'ETTm1': Dataset_ETT_minute,
-    'ETTm2': Dataset_ETT_minute,
-    'custom': Dataset_Custom,
-}
 
 
 def data_provider(args, flag):
-    Data = data_dict[args.data]
-    timeenc = 0 if args.embed != 'timeF' else 1
+    """
+    Unified data provider for RAFT and non-RAFT models.
 
-    shuffle_flag = False if (flag == 'test' or flag == 'TEST') else True
-    drop_last = False
-    batch_size = args.batch_size
-    freq = args.freq
+    Returns:
+        dataset (Dataset)
+        dataloader (DataLoader)
 
-    # We currently supports only forecasting
+    Ensures:
+        - consistent batch format
+        - correct splitting (train/val/test)
+        - correct batch_size and shuffle settings
+        - returns index in __getitem__ for RAFT
+    """
 
-    data_set = Data(
-        args = args,
+    # ------------------------------------
+    # Split configuration
+    # ------------------------------------
+    if flag == 'train':
+        shuffle_flag = True
+        drop_last = True
+        batch_size = args.batch_size
+    else:
+        shuffle_flag = False
+        drop_last = False
+        batch_size = args.batch_size
+
+    # ------------------------------------
+    # Build dataset
+    # ------------------------------------
+    dataset = Dataset_Custom(
         root_path=args.root_path,
         data_path=args.data_path,
         flag=flag,
-        size=[args.seq_len, args.label_len, args.pred_len],
+        seq_len=args.seq_len,
+        label_len=args.label_len,
+        pred_len=args.pred_len,
+        scale=True,
+        inverse=args.inverse,
         features=args.features,
         target=args.target,
-        timeenc=timeenc,
-        freq=freq,
-        seasonal_patterns=None # We do not use this option.
+        timeenc=args.timeenc,
+        freq=args.freq
     )
-    print(flag, len(data_set))
-    data_loader = DataLoader(
-        data_set,
+
+    # ------------------------------------
+    # Build dataloader
+    # ------------------------------------
+    dataloader = DataLoader(
+        dataset,
         batch_size=batch_size,
         shuffle=shuffle_flag,
         num_workers=args.num_workers,
-        drop_last=drop_last)
-    return data_set, data_loader
+        drop_last=drop_last
+    )
+
+    return dataset, dataloader
