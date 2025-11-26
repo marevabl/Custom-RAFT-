@@ -14,7 +14,15 @@ class Model(nn.Module):
         individual: Bool, whether shared model among different variates.
         """
         super(Model, self).__init__()
-        self.device = torch.device(f'cuda:{configs.gpu}')
+       
+        if getattr(configs, "use_gpu", False) and torch.cuda.is_available():
+         # use configs.gpu if present, otherwise default to 0
+          gpu_id = getattr(configs, "gpu", 0)
+          self.device = torch.device(f"cuda:{gpu_id}")
+        else:
+          # fall back to CPU
+          self.device = torch.device("cpu")
+            
         self.task_name = configs.task_name
         self.seq_len = configs.seq_len
         if self.task_name == 'classification' or self.task_name == 'anomaly_detection' or self.task_name == 'imputation':
