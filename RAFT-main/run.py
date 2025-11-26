@@ -37,6 +37,10 @@ def main():
                         help='start token length')
     parser.add_argument('--pred_len', type=int, default=24,
                         help='prediction sequence length')
+        # Model / retrieval hyperparameters
+    parser.add_argument('--n_period', type=int, default=24,
+                        help='period length for retrieval (e.g. 24 for 24h daily seasonality)')
+
         # Model input/output sizes (will be auto-set from data if not given)
     parser.add_argument('--enc_in', type=int, default=None,
                         help='encoder input size (number of features)')
