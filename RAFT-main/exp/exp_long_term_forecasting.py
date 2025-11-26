@@ -10,8 +10,8 @@ import time
 import warnings
 import numpy as np
 import copy
-from utils.dtw_metric import dtw,accelerated_dtw
-from utils.augmentation import run_augmentation,run_augmentation_single
+from utils.dtw_metric import dtw, accelerated_dtw
+from utils.augmentation import run_augmentation, run_augmentation_single
 
 warnings.filterwarnings('ignore')
 
@@ -21,20 +21,29 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         super(Exp_Long_Term_Forecast, self).__init__(args)
 
     def _build_model(self):
+        """
+        Build the forecasting model and, for RAFT, prepare datasets at model level.
+        """
         model = self.model_dict[self.args.model].Model(self.args).float()
 
         if self.args.use_multi_gpu and self.args.use_gpu:
             model = nn.DataParallel(model, device_ids=self.args.device_ids)
-            
+
+        # For RAFT: give the model access to the datasets for retrieval
         train_data, train_loader = self._get_data(flag='train')
         vali_data, vali_loader = self._get_data(flag='val')
         test_data, test_loader = self._get_data(flag='test')
-        
-        model.prepare_dataset(train_data, vali_data, test_data)
-        
+
+        if self.args.model == 'RAFT':
+            # Custom method defined in RAFT model to cache / index datasets
+            model.prepare_dataset(train_data, vali_data, test_data)
+
         return model
 
     def _get_data(self, flag):
+        """
+        Get dataset and dataloader for a given split (train/val/test).
+        """
         data_set, data_loader = data_provider(self.args, flag)
         return data_set, data_loader
 
@@ -47,6 +56,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         return criterion
 
     def vali(self, vali_data, vali_loader, criterion):
+        """
+        Validation loop: returns average validation loss.
+        Handles both RAFT and non-RAFT models.
+        """
         total_loss = []
         self.model.eval()
         with torch.no_grad():
@@ -59,7 +72,11 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
                 # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                dec_inp = torch.cat(
+                    [batch_y[:, :self.args.label_len, :], dec_inp],
+                    dim=1
+                ).float().to(self.device)
+
                 # encoder - decoder
                 if self.args.model == 'RAFT':
                     outputs = self.model(batch_x, index, mode='valid')
@@ -69,7 +86,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                     else:
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
-                        
+
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
                 batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
@@ -78,13 +95,17 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 true = batch_y.detach().cpu()
 
                 loss = criterion(pred, true)
+                total_loss.append(loss.item())
 
-                total_loss.append(loss)
         total_loss = np.average(total_loss)
         self.model.train()
         return total_loss
 
     def train(self, setting):
+        """
+        Training loop with validation each epoch.
+        For RAFT, uses the special forward() signature with index & mode.
+        """
         train_data, train_loader = self._get_data(flag='train')
         vali_data, vali_loader = self._get_data(flag='val')
         test_data, test_loader = self._get_data(flag='test')
@@ -94,9 +115,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
             os.makedirs(path)
 
         time_now = time.time()
-
         train_steps = len(train_loader)
-#         early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
+
+        # Early stopping could be re-enabled if desired
+        # early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
 
         model_optim = self._select_optimizer()
         criterion = self._select_criterion()
@@ -106,16 +128,18 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
         best_valid_loss = float('inf')
         best_model = None
-            
+
         for epoch in range(self.args.train_epochs):
             iter_count = 0
             train_loss = []
 
             self.model.train()
             epoch_time = time.time()
+
             for i, (index, batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(train_loader):
                 iter_count += 1
                 model_optim.zero_grad()
+
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float().to(self.device)
                 batch_x_mark = batch_x_mark.float().to(self.device)
@@ -123,7 +147,10 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
                 # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                dec_inp = torch.cat(
+                    [batch_y[:, :self.args.label_len, :], dec_inp],
+                    dim=1
+                ).float().to(self.device)
 
                 # encoder - decoder
                 if self.args.model == 'RAFT':
@@ -137,12 +164,15 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
                 f_dim = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
-                loss = criterion(outputs, batch_y)
+                batch_y_target = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+
+                loss = criterion(outputs, batch_y_target)
                 train_loss.append(loss.item())
 
                 if (i + 1) % 100 == 0:
-                    print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(i + 1, epoch + 1, loss.item()))
+                    print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(
+                        i + 1, epoch + 1, loss.item()
+                    ))
                     speed = (time.time() - time_now) / iter_count
                     left_time = speed * ((self.args.train_epochs - epoch) * train_steps - i)
                     print('\tspeed: {:.4f}s/iter; left time: {:.4f}s'.format(speed, left_time))
@@ -158,35 +188,50 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                     model_optim.step()
 
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
+
             train_loss = np.average(train_loss)
             vali_loss = self.vali(vali_data, vali_loader, criterion)
             test_loss = self.vali(test_data, test_loader, criterion)
 
-            print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
-                epoch + 1, train_steps, train_loss, vali_loss, test_loss))
+            print(
+                "Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} "
+                "Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
+                    epoch + 1, train_steps, train_loss, vali_loss, test_loss
+                )
+            )
 
-            adjust_learning_rate(model_optim, epoch + 1, self.args)
-            # We do not use early stopping
-            
+            # Track best validation loss
             if vali_loss < best_valid_loss:
-                best_model = copy.deepcopy(self.model)
                 best_valid_loss = vali_loss
-                
-        best_model_path = path + '/' + 'checkpoint.pth'
-        torch.save(best_model.state_dict(), best_model_path)
-#         self.model.load_state_dict(torch.load(best_model_path))
+                best_model = copy.deepcopy(self.model)
 
-#         return self.model
-        return best_model
+            # Adjust learning rate
+            adjust_learning_rate(self.model_optim, epoch + 1, self.args)
+
+        # Save best model
+        if best_model is not None:
+            self.model = best_model
+            torch.save(self.model.state_dict(), os.path.join(path, 'checkpoint.pth'))
+
+        return self.model
 
     def test(self, setting, test=0):
+        """
+        Test loop:
+        - loads best checkpoint if test=1
+        - runs inference on test set
+        - saves predictions, ground truth, and metrics (including dtw if enabled)
+        """
         test_data, test_loader = self._get_data(flag='test')
         if test:
             print('loading model')
-            self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
+            self.model.load_state_dict(
+                torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth'))
+            )
 
         preds = []
         trues = []
+
         folder_path = './test_results/' + setting + '/'
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
@@ -202,7 +247,11 @@ class Exp_Long_Term_Forecast(Exp_Basic):
 
                 # decoder input
                 dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                dec_inp = torch.cat(
+                    [batch_y[:, :self.args.label_len, :], dec_inp],
+                    dim=1
+                ).float().to(self.device)
+
                 # encoder - decoder
                 if self.args.model == 'RAFT':
                     outputs = self.model(batch_x, index, mode='test')
@@ -214,71 +263,68 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                         outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
 
                 f_dim = -1 if self.args.features == 'MS' else 0
+
+                # Keep full channel dimension for inverse transform; slice after
                 outputs = outputs[:, -self.args.pred_len:, :]
                 batch_y = batch_y[:, -self.args.pred_len:, :].to(self.device)
+
                 outputs = outputs.detach().cpu().numpy()
                 batch_y = batch_y.detach().cpu().numpy()
+
                 if test_data.scale and self.args.inverse:
                     shape = outputs.shape
-                    outputs = test_data.inverse_transform(outputs.reshape(shape[0] * shape[1], -1)).reshape(shape)
-                    batch_y = test_data.inverse_transform(batch_y.reshape(shape[0] * shape[1], -1)).reshape(shape)
-        
+                    outputs = test_data.inverse_transform(
+                        outputs.reshape(shape[0] * shape[1], -1)
+                    ).reshape(shape)
+                    batch_y = test_data.inverse_transform(
+                        batch_y.reshape(shape[0] * shape[1], -1)
+                    ).reshape(shape)
+
                 outputs = outputs[:, :, f_dim:]
                 batch_y = batch_y[:, :, f_dim:]
 
-                pred = outputs
-                true = batch_y
+                preds.append(outputs)
+                trues.append(batch_y)
 
-                preds.append(pred)
-                trues.append(true)
-                if i % 20 == 0:
-                    input = batch_x.detach().cpu().numpy()
-                    if test_data.scale and self.args.inverse:
-                        shape = input.shape
-                        input = test_data.inverse_transform(input.reshape(shape[0] * shape[1], -1)).reshape(shape)
-                    gt = np.concatenate((input[0, :, -1], true[0, :, -1]), axis=0)
-                    pd = np.concatenate((input[0, :, -1], pred[0, :, -1]), axis=0)
-                    visual(gt, pd, os.path.join(folder_path, str(i) + '.pdf'))
+        preds = np.array(preds)
+        trues = np.array(trues)
 
-        preds = np.concatenate(preds, axis=0)
-        trues = np.concatenate(trues, axis=0)
-        print('test shape:', preds.shape, trues.shape)
         preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
         trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
-        print('test shape:', preds.shape, trues.shape)
 
         # result save
         folder_path = './results/' + setting + '/'
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
-        
+
         # dtw calculation
         if self.args.use_dtw:
             dtw_list = []
             manhattan_distance = lambda x, y: np.abs(x - y)
             for i in range(preds.shape[0]):
-                x = preds[i].reshape(-1,1)
-                y = trues[i].reshape(-1,1)
+                x = preds[i].reshape(-1, 1)
+                y = trues[i].reshape(-1, 1)
                 if i % 100 == 0:
                     print("calculating dtw iter:", i)
-                d, _, _, _ = accelerated_dtw(x, y, dist=manhattan_distance)
+                d, cost_matrix, acc_cost_matrix, path = accelerated_dtw(
+                    x, y, dist=manhattan_distance
+                )
                 dtw_list.append(d)
-            dtw = np.array(dtw_list).mean()
+            dtw_value = np.mean(np.array(dtw_list))
         else:
-            dtw = -999
-            
+            dtw_value = None
 
         mae, mse, rmse, mape, mspe = metric(preds, trues)
-        print('mse:{}, mae:{}, dtw:{}'.format(mse, mae, dtw))
-        f = open("result_long_term_forecast.txt", 'a')
-        f.write(setting + "  \n")
-        f.write('mse:{}, mae:{}, dtw:{}'.format(mse, mae, dtw))
-        f.write('\n')
-        f.write('\n')
-        f.close()
+        print('mse:{}, mae:{}, dtw:{}'.format(mse, mae, dtw_value))
 
-        np.save(folder_path + 'metrics.npy', np.array([mae, mse, rmse, mape, mspe]))
-        np.save(folder_path + 'pred.npy', preds)
-        np.save(folder_path + 'true.npy', trues)
+        with open("result_long_term_forecast.txt", 'a') as f:
+            f.write(setting + "  \n")
+            f.write('mse:{}, mae:{}, dtw:{}'.format(mse, mae, dtw_value))
+            f.write('\n\n')
+
+        np.save(os.path.join(folder_path, 'metrics.npy'),
+                np.array([mae, mse, rmse, mape, mspe]))
+        np.save(os.path.join(folder_path, 'pred.npy'), preds)
+        np.save(os.path.join(folder_path, 'true.npy'), trues)
 
         return
