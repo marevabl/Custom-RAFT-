@@ -1,6 +1,7 @@
 import argparse
 import os
 import torch
+import pandas as pd  
 from exp.exp_long_term_forecasting import Exp_Long_Term_Forecast
 
 # Disable warnings for cleaner output
@@ -36,6 +37,14 @@ def main():
                         help='start token length')
     parser.add_argument('--pred_len', type=int, default=24,
                         help='prediction sequence length')
+        # Model input/output sizes (will be auto-set from data if not given)
+    parser.add_argument('--enc_in', type=int, default=None,
+                        help='encoder input size (number of features)')
+    parser.add_argument('--dec_in', type=int, default=None,
+                        help='decoder input size (number of features)')
+    parser.add_argument('--c_out', type=int, default=None,
+                        help='output size (number of features)')
+
 
     # --------------------------------------------------
     # Optimization settings
@@ -82,6 +91,22 @@ def main():
         args.use_gpu = torch.cuda.is_available()
     if args.use_multi_gpu:
         args.device_ids = [int(i) for i in args.device_ids.split(',')]
+    # --------------------------------------------------
+    # Infer enc_in / dec_in / c_out from the CSV
+    # --------------------------------------------------
+    data_full_path = os.path.join(args.root_path, args.data_path)
+    df = pd.read_csv(data_full_path)
+
+    # keep only numeric columns (same idea as Dataset_Custom)
+    df_num = df.select_dtypes(include=['float32', 'float64', 'int32', 'int64'])
+    num_features = df_num.shape[1]
+
+    if args.enc_in is None:
+        args.enc_in = num_features
+    if args.dec_in is None:
+        args.dec_in = num_features
+    if args.c_out is None:
+        args.c_out = num_features
 
     print("Using GPU:", args.use_gpu)
 
