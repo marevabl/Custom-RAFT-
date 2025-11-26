@@ -1,17 +1,19 @@
-# Retrieval-Augmented Forecasting of Time-series (RAFT)
-This is the official PyTorch implementation of our paper ([Link](https://arxiv.org/abs/2505.04163)), which is accepted to ICML 2025. \
-The code is build on the base of [Time-Series-Library](https://github.com/thuml/Time-Series-Library).
+# RAFT — Customized Version for COMP 433 Project, mostly for the weather dataset
 
+This repository contains a **clean, improved, and fully reproducible version** of the RAFT (Retrieval-Augmented Forecasting Transformer) model adapted for our COMP 433 project.  
+It includes several **bug fixes**, **dataset handling improvements**, and **Colab-friendly modifications** so training is stable and easy.
 
-### Required Packages
-* python == 3.9.13
-* numpy == 1.24.3
-* torch == 1.10.0
-* tqdm == 4.65.0
+---
 
-### Usage
-1. Create ./data directory and place dataset files in ./data directory.
-2. Run following code.
-```
-python3 run.py --data [DATASET]
-```
+###  Clean dataset pipeline
+- Automatically detects and parses **date columns**
+- Removes all **non-numeric** columns automatically  
+- Ensures all data is **float32** (PyTorch requirement)
+- Supports *any* numeric time-series CSV (Weather, Chess, etc.)
+- Stable scaling + optional inverse-scaling
+
+### Your CSV mist contain only numreic features
+date,meantemp,humidity,wind_speed,meanpressure
+2010-01-01,10.0,69,6.0,1015
+2010-01-02,7.4,76,3.5,1017
+...
