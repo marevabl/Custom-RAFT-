@@ -87,6 +87,9 @@ class Model(nn.Module):
         if hasattr(index, "device") and index.device.type != "cpu":
             index = index.cpu()
 
+        _, num_windows, _, _ = self.retrieval_dict[mode].shape
+        index = index.clamp(min=0, max=num_windows - 1)
+        
         bsz, seq_len, channels = x.shape
         # Ensure sequence and channel sizes match configuration
         assert seq_len == self.seq_len and channels == self.channels
