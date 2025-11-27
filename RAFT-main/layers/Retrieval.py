@@ -21,15 +21,17 @@ class RetrievalTool():
         return_key=False,
     ):
         period_num = [16, 8, 4, 2, 1]
+        # Select the last n_period elements (but list is only length 5)
         period_num = period_num[-1 * n_period:]
         
         self.seq_len = seq_len
         self.pred_len = pred_len
         self.channels = channels
+
         
-        self.n_period = n_period
+        # self.n_period must match the number of groups (G), not the raw n_period arg
         self.period_num = sorted(period_num, reverse=True)
-        
+        self.n_period = len(self.period_num)
         self.temperature = temperature
         self.topm = topm
         
