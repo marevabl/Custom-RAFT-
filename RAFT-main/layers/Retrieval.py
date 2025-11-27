@@ -21,46 +21,57 @@ class RetrievalTool():
         return_key=False,
     ):
         period_num = [16, 8, 4, 2, 1]
-        # Select the last n_period elements (but list is only length 5)
+        # select last n_period scales (list length is 5)
         period_num = period_num[-1 * n_period:]
-        
+
         self.seq_len = seq_len
         self.pred_len = pred_len
         self.channels = channels
 
-        
-        # self.n_period must match the number of groups (G), not the raw n_period arg
+        # number of groups G must match length of period_num
         self.period_num = sorted(period_num, reverse=True)
         self.n_period = len(self.period_num)
+
         self.temperature = temperature
         self.topm = topm
-        
+
         self.with_dec = with_dec
         self.return_key = return_key
-        
+
     def prepare_dataset(self, train_data):
         train_data_all = []
         y_data_all = []
 
         for i in range(len(train_data)):
             td = train_data[i]
+            # td[1] is batch_x  -> encoder input
             train_data_all.append(td[1])
-            
+
+            # td[2] is batch_y  -> decoder input/target
             if self.with_dec:
-                y_data_all.append(td[2][-(train_data.pred_len + train_data.label_len):])
+                # label_len + pred_len
+                y_data_all.append(
+                    td[2][-(train_data.pred_len + train_data.label_len):]
+                )
             else:
+                # only last pred_len steps as target
                 y_data_all.append(td[2][-train_data.pred_len:])
-            
-        self.train_data_all = torch.tensor(np.stack(train_data_all, axis=0)).float()
+
+        # N, T, S, C (in original RAFT they reshape later, here we keep as float)
+        self.train_data_all = torch.tensor(
+            np.stack(train_data_all, axis=0)
+        ).float()
         self.train_data_all_mg, _ = self.decompose_mg(self.train_data_all)
-        
-        self.y_data_all = torch.tensor(np.stack(y_data_all, axis=0)).float()
+
+        self.y_data_all = torch.tensor(
+            np.stack(y_data_all, axis=0)
+        ).float()
         self.y_data_all_mg, _ = self.decompose_mg(self.y_data_all)
 
         self.n_train = self.train_data_all.shape[0]
 
-        def decompose_mg(self, data_all, remove_offset=True):
-        # data_all: T, S, C
+    def decompose_mg(self, data_all, remove_offset=True):
+        # data_all: T, S, C  (or N, S, C – we treat first dim as "time-like")
         data_all = copy.deepcopy(data_all)
 
         T, S, C = data_all.shape
@@ -72,25 +83,23 @@ class RetrievalTool():
             cur = cur.mean(dim=-1)                              # T, S', C
             cur = cur.repeat_interleave(repeats=g, dim=1)       # T, S'*g, C
 
-            # Make sure all cur have the same length S
+            # Ensure all cur have same length S along dim=1
             if cur.size(1) < S:
-                # pad by repeating the last value
                 pad_len = S - cur.size(1)
                 last = cur[:, -1:, :].repeat(1, pad_len, 1)
                 cur = torch.cat([cur, last], dim=1)
             elif cur.size(1) > S:
-                # truncate if slightly too long
                 cur = cur[:, :S, :]
 
             mg.append(cur)
 
-        # Now all mg[i] have shape (T, S, C)
+        # Now every element in mg has shape (T, S, C)
         mg = torch.stack(mg, dim=0)  # G, T, S, C
 
         if remove_offset:
             offset = []
             for i, data_p in enumerate(mg):
-                cur_offset = data_p[:, -1:, :]   # last step as offset
+                cur_offset = data_p[:, -1:, :]
                 mg[i] = data_p - cur_offset
                 offset.append(cur_offset)
             offset = torch.stack(offset, dim=0)  # G, T, 1, C
@@ -127,7 +136,7 @@ class RetrievalTool():
         index = index.to(x.device)
         
         bsz, seq_len, channels = x.shape
-        assert(seq_len == self.seq_len, channels == self.channels)
+        assert seq_len == self.seq_len and channels == self.channels
         
         x_mg, mg_offset = self.decompose_mg(x) # G, B, S, C
 
