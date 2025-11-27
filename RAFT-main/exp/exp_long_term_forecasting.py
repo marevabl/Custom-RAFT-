@@ -207,7 +207,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 best_model = copy.deepcopy(self.model)
 
             # Adjust learning rate
-            adjust_learning_rate(self.model_optim, epoch + 1, self.args)
+            #adjust_learning_rate(self.model_optim, epoch + 1, self.args)
 
         # Save best model
         if best_model is not None:
