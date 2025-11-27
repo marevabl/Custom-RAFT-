@@ -287,9 +287,7 @@ class Exp_Long_Term_Forecast(Exp_Basic):
                 preds.append(outputs)
                 trues.append(batch_y)
 
-        preds = np.array(preds)
-        trues = np.array(trues)
-
+        # Concatenate along batch dimension; handles last smaller batch safely
         preds = np.concatenate(preds, axis=0)
         trues = np.concatenate(trues, axis=0)
 
