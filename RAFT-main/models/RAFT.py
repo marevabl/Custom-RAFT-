@@ -92,7 +92,8 @@ class Model(nn.Module):
 
         x_pred_from_x = self.linear_x(x_norm.permute(0, 2, 1)).permute(0, 2, 1) # B, P, C
         
-        pred_from_retrieval = self.retrieval_dict[mode][:, index] # G, B, P, C
+        idx_cpu = index if (not hasattr(index, "device") or index.device.type == "cpu") else index.cpu()
+        pred_from_retrieval = self.retrieval_dict[model][:, idx_cpu]  # G, B, P, C
         pred_from_retrieval = pred_from_retrieval.to(self.device)
         
         retrieval_pred_list = []
