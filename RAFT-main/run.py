@@ -27,6 +27,9 @@ def main():
                         help='target variable name in dataset')
     parser.add_argument('--freq', type=str, required=False, default='h',
                         help='frequency for time encoding')
+    parser.add_argument('--timeenc', type=int, default=0,
+                        help='time encoding type, 0 = simple numeric time features, 1 = learned embeddings')
+ 
 
     # --------------------------------------------------
     # Data window lengths
