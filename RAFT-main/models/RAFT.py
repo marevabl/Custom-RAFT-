@@ -81,44 +81,48 @@ class Model(nn.Module):
         self.retrieval_dict['valid'] = valid_rt.detach()
         self.retrieval_dict['test'] = test_rt.detach()
 
-    def encoder(self, x, index, mode):
-        index = index.to(self.device)
-        
+        def encoder(self, x, index, mode):
+        # Keep indices on CPU because retrieval_dict is stored on CPU
+        if hasattr(index, "device") and index.device.type != "cpu":
+            index = index.cpu()
+
         bsz, seq_len, channels = x.shape
-        assert(seq_len == self.seq_len, channels == self.channels)
-        
+        # Fix the SyntaxWarning: use "and" instead of a comma
+        assert seq_len == self.seq_len and channels == self.channels
+
+        # Normalize by last value
         x_offset = x[:, -1:, :].detach()
         x_norm = x - x_offset
 
-        x_pred_from_x = self.linear_x(x_norm.permute(0, 2, 1)).permute(0, 2, 1) # B, P, C
-        
-        idx_cpu = index if (not hasattr(index, "device") or index.device.type == "cpu") else index.cpu()
-        pred_from_retrieval = self.retrieval_dict[model][:, idx_cpu]  # G, B, P, C
+        # Prediction from the current sequence
+        x_pred_from_x = self.linear_x(x_norm.permute(0, 2, 1)).permute(0, 2, 1)  # [B, P, C]
+
+        # Prediction from retrieval bank (stored by mode: 'train', 'valid', 'test')
+        pred_from_retrieval = self.retrieval_dict[mode][:, index]  # [G, B, P, C]
         pred_from_retrieval = pred_from_retrieval.to(self.device)
-        
+
         retrieval_pred_list = []
-        
-        # Compress repeating dimensions
+
         for i, pr in enumerate(pred_from_retrieval):
-            assert((bsz, self.pred_len, channels) == pr.shape)
-            g = self.period_num[i]
+            assert pr.shape == (bsz, self.pred_len, channels)
+            g = self.period_num[i]                # period (e.g. 8, 4, 2, 1)
             pr = pr.reshape(bsz, self.pred_len // g, g, channels)
-            pr = pr[:, :, 0, :]
-            
+            pr = pr[:, :, 0, :]                   # take one location in each group
+
             pr = self.retrieval_pred[i](pr.permute(0, 2, 1)).permute(0, 2, 1)
             pr = pr.reshape(bsz, self.pred_len, self.channels)
-            
+
             retrieval_pred_list.append(pr)
 
-        retrieval_pred_list = torch.stack(retrieval_pred_list, dim=1)
-        retrieval_pred_list = retrieval_pred_list.sum(dim=1)
-        
-        pred = torch.cat([x_pred_from_x, retrieval_pred_list], dim=1)
-        pred = self.linear_pred(pred.permute(0, 2, 1)).permute(0, 2, 1).reshape(bsz, self.pred_len, self.channels)
-        
-        pred = pred + x_offset
-        
-        return pred
+        retrieval_pred_list = torch.stack(retrieval_pred_list, dim=1)  # [B, G, P, C]
+        retrieval_pred_list = retrieval_pred_list.sum(dim=1)           # [B, P, C]
+
+        # Add predictions + denormalize
+        retrieval_pred_list = retrieval_pred_list + x_pred_from_x
+        retrieval_pred_list = retrieval_pred_list + x_offset
+
+        return retrieval_pred_list
+
 
     def forecast(self, x_enc, index, mode):
         # Encoder
