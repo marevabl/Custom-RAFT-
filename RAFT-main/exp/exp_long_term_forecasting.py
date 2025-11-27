@@ -290,13 +290,18 @@ class Exp_Long_Term_Forecast(Exp_Basic):
         preds = np.array(preds)
         trues = np.array(trues)
 
-        preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
-        trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
+        preds = np.concatenate(preds, axis=0)
+        trues = np.concatenate(trues, axis=0)
+
+        # Now preds and trues are [N, pred_len, C] already, so no extra reshape needed
 
         # result save
-        folder_path = './results/' + setting + '/'
+        folder_path = './test_results/' + setting + '/'
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
+
+
+
 
         # dtw calculation
         if self.args.use_dtw:
