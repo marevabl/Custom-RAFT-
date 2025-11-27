@@ -59,31 +59,46 @@ class RetrievalTool():
 
         self.n_train = self.train_data_all.shape[0]
 
-    def decompose_mg(self, data_all, remove_offset=True):
-        data_all = copy.deepcopy(data_all) # T, S, C
+        def decompose_mg(self, data_all, remove_offset=True):
+        # data_all: T, S, C
+        data_all = copy.deepcopy(data_all)
 
+        T, S, C = data_all.shape
         mg = []
+
         for g in self.period_num:
-            cur = data_all.unfold(dimension=1, size=g, step=g).mean(dim=-1)
-            cur = cur.repeat_interleave(repeats=g, dim=1)
-            
+            # Unfold along the sequence dimension (dim=1)
+            cur = data_all.unfold(dimension=1, size=g, step=g)  # T, S', C, g
+            cur = cur.mean(dim=-1)                              # T, S', C
+            cur = cur.repeat_interleave(repeats=g, dim=1)       # T, S'*g, C
+
+            # Make sure all cur have the same length S
+            if cur.size(1) < S:
+                # pad by repeating the last value
+                pad_len = S - cur.size(1)
+                last = cur[:, -1:, :].repeat(1, pad_len, 1)
+                cur = torch.cat([cur, last], dim=1)
+            elif cur.size(1) > S:
+                # truncate if slightly too long
+                cur = cur[:, :S, :]
+
             mg.append(cur)
-#             data_all = data_all - cur
-            
-        mg = torch.stack(mg, dim=0) # G, T, S, C
+
+        # Now all mg[i] have shape (T, S, C)
+        mg = torch.stack(mg, dim=0)  # G, T, S, C
 
         if remove_offset:
             offset = []
             for i, data_p in enumerate(mg):
-                cur_offset = data_p[:,-1:,:]
+                cur_offset = data_p[:, -1:, :]   # last step as offset
                 mg[i] = data_p - cur_offset
                 offset.append(cur_offset)
+            offset = torch.stack(offset, dim=0)  # G, T, 1, C
         else:
             offset = None
-            
-        offset = torch.stack(offset, dim=0)
-            
+
         return mg, offset
+
     
     def periodic_batch_corr(self, data_all, key, in_bsz = 512):
         _, bsz, features = key.shape
