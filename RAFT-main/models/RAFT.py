@@ -81,30 +81,33 @@ class Model(nn.Module):
         self.retrieval_dict['valid'] = valid_rt.detach()
         self.retrieval_dict['test'] = test_rt.detach()
 
-        def encoder(self, x, index, mode):
+    def encoder(self, x, index, mode):
+        """Core RAFT encoder used for forecasting / imputation / etc."""
         # Keep indices on CPU because retrieval_dict is stored on CPU
         if hasattr(index, "device") and index.device.type != "cpu":
             index = index.cpu()
 
         bsz, seq_len, channels = x.shape
-        # Fix the SyntaxWarning: use "and" instead of a comma
+        # Ensure sequence and channel sizes match configuration
         assert seq_len == self.seq_len and channels == self.channels
 
-        # Normalize by last value
+        # Normalize by last value to stabilize training
         x_offset = x[:, -1:, :].detach()
         x_norm = x - x_offset
 
-        # Prediction from the current sequence
+        # Prediction from the current sequence only
         x_pred_from_x = self.linear_x(x_norm.permute(0, 2, 1)).permute(0, 2, 1)  # [B, P, C]
 
-        # Prediction from retrieval bank (stored by mode: 'train', 'valid', 'test')
+        # Prediction from retrieval bank (stored per mode: 'train', 'valid', 'test')
         pred_from_retrieval = self.retrieval_dict[mode][:, index]  # [G, B, P, C]
         pred_from_retrieval = pred_from_retrieval.to(self.device)
 
         retrieval_pred_list = []
 
         for i, pr in enumerate(pred_from_retrieval):
+            # pr expected shape: (batch_size, pred_len, channels)
             assert pr.shape == (bsz, self.pred_len, channels)
+
             g = self.period_num[i]                # period (e.g. 8, 4, 2, 1)
             pr = pr.reshape(bsz, self.pred_len // g, g, channels)
             pr = pr[:, :, 0, :]                   # take one location in each group
@@ -114,17 +117,17 @@ class Model(nn.Module):
 
             retrieval_pred_list.append(pr)
 
+        # Aggregate across all periods
         retrieval_pred_list = torch.stack(retrieval_pred_list, dim=1)  # [B, G, P, C]
         retrieval_pred_list = retrieval_pred_list.sum(dim=1)           # [B, P, C]
 
-        # Add predictions + denormalize
+        # Combine with prediction from x and denormalize
         retrieval_pred_list = retrieval_pred_list + x_pred_from_x
         retrieval_pred_list = retrieval_pred_list + x_offset
 
         return retrieval_pred_list
 
-
-    def forecast(self, x_enc, index, mode):
+def forecast(self, x_enc, index, mode):
         # Encoder
         return self.encoder(x_enc, index, mode)
 
